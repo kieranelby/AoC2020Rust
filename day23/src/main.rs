@@ -1,97 +1,107 @@
 use std::fmt;
-use std::str::FromStr;
-use std::num::ParseIntError;
+
+const NUM_CUPS : usize = 1_000_000;
+//const NUM_CUPS : usize = 9;
+
+static mut CUPS_RING : [CupLabel;NUM_CUPS] = [0;NUM_CUPS];
 
 fn main() {
-  let input = "389125467";
-  //let input = "476138259";
+  //let input = "389125467";
+  let input = "476138259";
   //let num_moves = 10;
+  //let num_moves = 100;
   let num_moves = 10_000_000;
-  //let num_moves = 1000;
-  let mut cups : Cups = input.parse().expect("input should be cup labels");
-  //cups = cups.pad(100);
-  cups = cups.pad(1_000_000);
+  let mut cups = Cups::new(input);
   for move_num in 1..=num_moves {
-    println!("-- move {} --", move_num);
-    cups.pick_up_three();
+    if move_num < 100 || move_num % 100 == 0 {
+      println!("-- move {} --", move_num);
+    }
+    cups.choose_three();
     let destination = cups.choose_destination();
-    println!("destination: {}", destination);
-    cups.place(destination);
+    if cups.len() < 50 && move_num <= 100 {
+      println!("{}", cups);
+      println!("destination: {}", destination);
+  }
+    cups.move_chosen(destination);
     cups.select_new_current_cup();
   }
   println!("-- final --");
-  println!("{}", cups);
   if cups.len() <= 10 {
+    println!("{}", cups);
     println!("labels after: {}", cups.labels_after(1));
   }
   let c1 = cups.clockwise_of(1);
   let c2 = cups.clockwise_of(c1);
-  println!("{} * {} + {}", c1, c2, c1 * c2);
+  let cp = c1  as u64 * c2  as u64;
+  println!("{} * {} = {}", c1, c2, cp);
 }
 
 type CupLabel = u32;
 
-#[derive(Debug, Clone)]
-struct Cups {
-  current_cup_label: CupLabel,
-  clockwise_cup_labels: Vec<CupLabel>,
+#[derive(Debug)]
+struct Cups<'a> {
+  ring: &'a mut [CupLabel;NUM_CUPS],
+  current_index: usize,
   picked_up: Vec<CupLabel>,
   lowest_label: CupLabel,
   highest_label: CupLabel
 }
 
-impl Cups {
+impl Cups<'_> {
 
-  fn new(clockwise_cup_labels: Vec<CupLabel>) -> Cups {
-    let lowest_label = *clockwise_cup_labels.iter().min().expect("should be some cups");
-    let highest_label = *clockwise_cup_labels.iter().max().expect("should be some cups");
-    Cups {
-      current_cup_label: clockwise_cup_labels[0],
-      clockwise_cup_labels: clockwise_cup_labels,
-      picked_up: Vec::new(),
-      lowest_label: lowest_label,
-      highest_label: highest_label,
-    }    
+  fn new(s : &str) -> Cups {
+    let clockwise_cup_labels =
+      s
+      .chars()
+      .map(|c| c.to_string().parse::<CupLabel>().expect("cup labels should be small non-negative numbers"))
+      .collect::<Vec<CupLabel>>();
+    unsafe {
+      for i in 1..=NUM_CUPS {
+        CUPS_RING[i-1] = i as CupLabel;
+      }
+      let mut i = 0;
+      for &cup in &clockwise_cup_labels {
+        CUPS_RING[i] = cup;
+        i += 1;
+      }
+      Cups {
+        ring: &mut CUPS_RING,
+        current_index: 0,
+        picked_up: Vec::new(),
+        lowest_label: 1,
+        highest_label: NUM_CUPS as CupLabel,
+      }
+    }
   }
 
   fn position_of(self : &Self, cup_label: CupLabel) -> usize {
-    self.clockwise_cup_labels
-    .iter()
-    .position(|&c| c == cup_label)
-    .expect("cup must exist")
+    self.ring.iter().position(|c| *c == cup_label).unwrap()
   }
   
+  #[inline(always)]
   fn len(self : &Self) -> usize {
-    self.clockwise_cup_labels.len()
+    NUM_CUPS
+  }
+
+  #[inline(always)]
+  fn increment_position(self : &Self, position: usize) -> usize {
+    if position == self.len() - 1 {
+      0
+    } else {
+      position + 1
+    }
   }
 
   fn clockwise_of(self : &Self, cup_label: CupLabel) -> CupLabel {
-    let position = self.position_of(cup_label);
-    let next_cup_index = if position < self.len() - 1 {
-      position + 1
-    } else {
-      0
-    };
-    self.clockwise_cup_labels[next_cup_index]
+    self.ring[self.increment_position(self.position_of(cup_label))]
   }
 
-  fn pick_up_one(self : &mut Self) {
-    let cup = self.clockwise_of(self.current_cup_label);
-    self.picked_up.push(cup);
-    // TODO - this is also slow
-    let clockwise_cup_labels : Vec<CupLabel> =
-      self.clockwise_cup_labels
-      .iter()
-      .filter(|&c| *c != cup)
-      .map(|c| *c)
-      .collect();
-    self.clockwise_cup_labels = clockwise_cup_labels;
-  }
-
-  fn pick_up_three(self : &mut Self) {
-    self.pick_up_one();
-    self.pick_up_one();
-    self.pick_up_one();
+  fn choose_three(self : &mut Self) {
+    let mut src = self.current_index;
+    for _ in 0..3 {
+      src = self.increment_position(src);
+      self.picked_up.push(self.ring[src]);
+    }
   }
 
   fn decrement_label(self : &Self, cup_label: CupLabel) -> CupLabel {
@@ -103,7 +113,7 @@ impl Cups {
   }
 
   fn choose_destination(self : &Self) -> CupLabel {
-    let mut destination = self.current_cup_label;
+    let mut destination = self.ring[self.current_index];
     loop {
       destination = self.decrement_label(destination);
       if !self.picked_up.contains(&destination) {
@@ -112,66 +122,85 @@ impl Cups {
     }
   }
 
-  fn place(self : &mut Self, destination : CupLabel) {
-    let position = self.position_of(destination);
-    // TODO - THIS IS SLOOOOOOWWWWW
-    let mut clockwise_cup_labels = Vec::new();
-    clockwise_cup_labels.extend(&self.clockwise_cup_labels[0..=position]);
-    clockwise_cup_labels.extend(&self.picked_up);
-    clockwise_cup_labels.extend(&self.clockwise_cup_labels[position+1..]);
-    self.clockwise_cup_labels = clockwise_cup_labels;
-    self.picked_up = Vec::new();
+  fn move_chosen(self : &mut Self, destination : CupLabel) {
+
+    let ring_len = self.len();
+    let pick_len = self.picked_up.len();
+    let original_destination_position = self.position_of(destination);
+    let mut dst = self.current_index;
+    let mut src = dst;
+    for _ in 0..pick_len {
+      src = self.increment_position(src);
+    }
+    let mut size_left = if original_destination_position >= src {
+      original_destination_position - src
+    } else {
+      ring_len - (src - original_destination_position)
+    };
+
+    while size_left > 0 {
+      const STRIDE : usize = 1024;
+      if STRIDE < size_left && dst + STRIDE < ring_len && src + STRIDE < ring_len {
+        self.ring.copy_within(src+1..src+STRIDE+1,dst+1);
+        dst += STRIDE;
+        src += STRIDE;
+        size_left -= STRIDE;
+      } else {
+        // yeah i don't know why i did the increment first
+        dst = self.increment_position(dst);
+        src = self.increment_position(src);
+        self.ring[dst] = self.ring[src];
+        size_left -= 1;
+      }
+    }
+
+    for &cup in &self.picked_up {
+      dst = self.increment_position(dst);
+      self.ring[dst] = cup;
+    }
+
+    self.picked_up.clear();
   }
 
+  fn is_current_at_end(self : &Self) -> bool {
+    self.current_index == self.len() - 1
+  } 
+
   fn select_new_current_cup(self : &mut Self) {
-    self.current_cup_label = self.clockwise_of(self.current_cup_label);
+    self.current_index = if self.is_current_at_end() {
+      0
+    } else {
+      self.current_index + 1
+    };
   }
 
   fn labels_after(self : &Self, cup_label : CupLabel) -> String {
-    let position = self.position_of(cup_label);
     let mut s = String::new();
-    for cup in &self.clockwise_cup_labels[position+1..] {
-      s.push_str(&cup.to_string());
-    }
-    for cup in &self.clockwise_cup_labels[0..position] {
-      s.push_str(&cup.to_string());
+    let mut position = self.position_of(cup_label);
+    let original_position = position;
+    loop {
+      position = self.increment_position(position);
+      if position == original_position {
+        break;
+      }
+      s.push_str(&self.ring[position].to_string());
     }
     s
   }
 
-  fn pad(self : &Self, last_cup : CupLabel) -> Cups {
-    let highest_label = *self.clockwise_cup_labels.iter().max().expect("should be some cups");
-    let mut clockwise_cup_labels = self.clockwise_cup_labels.clone();
-    clockwise_cup_labels.extend(highest_label+1..=last_cup);
-    return Cups {
-      clockwise_cup_labels: clockwise_cup_labels,
-      ..self.clone()
-    }
-  }
-
 }
 
-impl FromStr for Cups {
-  type Err = ParseIntError;
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let clockwise_cup_labels =
-      s
-      .chars()
-      .map(|c| c.to_string().parse::<CupLabel>().expect("cup labels should be small non-negative numbers"))
-      .collect::<Vec<CupLabel>>();
-    Ok(Cups::new(clockwise_cup_labels))
-  }
-}
-
-impl fmt::Display for Cups {
+impl fmt::Display for Cups<'_> {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "cups:")?;
-    for c in &self.clockwise_cup_labels {
-      if *c == self.current_cup_label {
-        write!(f, " ({})", c)?;
-      } else {
-        write!(f, " {}", c)?;
+    let mut position = self.current_index;
+    write!(f, " ({})", self.ring[position])?;
+    loop {
+      position = self.increment_position(position);
+      if position == self.current_index {
+        break;
       }
+      write!(f, " {}", self.ring[position])?;
     }
     if !self.picked_up.is_empty() {
       write!(f, "; pick up:")?;
@@ -181,28 +210,4 @@ impl fmt::Display for Cups {
     }
     Ok(())
   }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_something() {
-      let input = "389125467";
-      let mut cups : Cups = input.parse().expect("input should be cup labels");
-      assert_eq!(3, cups.current_cup_label);
-      assert_eq!(8, cups.decrement_label(9));
-      assert_eq!(9, cups.decrement_label(1));
-      assert_eq!(2, cups.choose_destination());
-      assert_eq!(5, cups.clockwise_of(2));
-      assert_eq!(7, cups.clockwise_of(6));
-      assert_eq!(3, cups.clockwise_of(7));
-      cups.pick_up_one();
-      assert_eq!(1, cups.picked_up.len());
-      assert_eq!(9, cups.clockwise_of(3));
-      cups.pick_up_one();
-      assert_eq!(1, cups.picked_up.len());
-      assert_eq!(9, cups.clockwise_of(3));
-    }
 }
