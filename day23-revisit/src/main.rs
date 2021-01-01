@@ -55,6 +55,24 @@ struct Cups {
   picked_up: Vec<CupRef>
 }
 
+impl Drop for Cups {
+  fn drop(&mut self) {
+    unsafe {
+      if !self.picked_up.is_empty() {
+        self.move_chosen(self.current_cup);
+      }
+      let mut cup = self.highest_cup;
+      while !cup.is_null() {
+        let next_cup = (*cup).lower;
+        let _junk = Box::from_raw(cup);
+        cup = next_cup;
+      }
+      self.current_cup = std::ptr::null_mut();
+      self.highest_cup = std::ptr::null_mut();
+    }
+  }
+}
+
 impl Cups {
 
   unsafe fn new() -> Cups {
